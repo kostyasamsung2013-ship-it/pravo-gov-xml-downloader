@@ -1,0 +1,29 @@
+name: Download pravo.gov.ru XML
+
+on:
+  # Запускать каждый день в 2:00 по UTC (5:00 по Москве)
+  schedule:
+    - cron: '0 2 * * *'
+  # Или вручную
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download document_list.xml.gz
+        run: |
+          echo "Скачивание файла..."
+          wget -nv https://pravo.gov.ru/portal/xml/document_list.xml.gz -O document_list.xml.gz
+          ls -lh
+
+      - name: Commit and push
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add document_list.xml.gz
+          git commit -m "Update document_list.xml.gz ($(date '+%Y-%m-%d %H:%M'))" || echo "Нет изменений"
+          git push
