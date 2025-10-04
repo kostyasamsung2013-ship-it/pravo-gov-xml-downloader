@@ -1,39 +1,61 @@
-name: Download pravo.gov.ru XML
+// fetch_xml.js - Устойчивый скрипт для выполнения в GitHub Actions
+const fetch = require('node-fetch');
+const zlib = require('zlib');
+const fs = require('fs/promises'); 
 
-on:
-  schedule:
-    - cron: '0 2 * * *'  # Ежедневно в 5:00 по Москве
-  workflow_dispatch:
+const GZ_URL = "https://pravo.gov.ru/portal/xml/document_list.xml.gz";
+const OUTPUT_FILE = 'document_list.xml';
+const DOWNLOAD_TIMEOUT_MS = 540000; // 9 минут в миллисекундах (максимальный таймаут GCF)
 
-jobs:
-  download:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+async function main() {
+    console.log(`Начало скачивания с ${GZ_URL} через сервер GitHub...`);
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+        controller.abort(); // Отмена запроса, если превышен таймаут
+    }, DOWNLOAD_TIMEOUT_MS);
 
-      - name: Download document_list.xml.gz
-        run: |
-          echo "Скачивание через имитацию браузера..."
-          curl -s -L \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-            -H "Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7" \
-            -H "Accept-Encoding: gzip, deflate" \
-            -H "Connection: keep-alive" \
-            -o document_list.xml.gz \
-            https://pravo.gov.ru/portal/xml/document_list.xml.gz
-          ls -lh
+    try {
+        // 1. Скачивание с таймаутом
+        const response = await fetch(GZ_URL, {
+            headers: { 'User-Agent': 'GitHub-Actions-Bot/1.0' },
+            signal: controller.signal // Привязываем контроллер таймаута
+        });
+        
+        clearTimeout(timeout); // Отмена таймаута, если запрос успешен
 
-      - name: Commit and push
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          if [ -f document_list.xml.gz ]; then
-            git add document_list.xml.gz
-            git commit -m "Update document_list.xml.gz ($(date '+%Y-%m-%d %H:%M'))" || echo "Нет изменений"
-            git push
-          else
-            echo "Файл не скачался!"
-            exit 1
-          fi
+        if (response.status === 404) {
+             throw new Error("Файл не найден (404). Проверьте URL.");
+        }
+        if (!response.ok) {
+            throw new Error(`Ошибка HTTP: ${response.status} ${response.statusText}`);
+        }
+
+        // 2. Распаковка GZip
+        const buffer = await response.buffer();
+        const xmlBuffer = await new Promise((resolve, reject) => {
+            zlib.gunzip(buffer, (err, decompressBuffer) => {
+                if (err) return reject(err);
+                resolve(decompressBuffer);
+            });
+        });
+
+        // 3. Сохранение в файл
+        const xmlString = xmlBuffer.toString('utf8');
+        await fs.writeFile(OUTPUT_FILE, xmlString);
+        
+        console.log(`✅ Файл успешно скачан, распакован и сохранен как ${OUTPUT_FILE}`);
+    } catch (error) {
+        clearTimeout(timeout);
+        // Если это ошибка таймаута
+        if (error.name === 'AbortError') {
+             console.error(`❌ Ошибка: Таймаут (${DOWNLOAD_TIMEOUT_MS / 60000} минут) превышен. Файл слишком большой.`);
+        } else {
+             console.error("❌ Непредвиденная ошибка при скачивании:", error.message);
+        }
+        // Возврат кода ошибки для GitHub Actions
+        process.exit(1); 
+    }
+}
+
+main();
