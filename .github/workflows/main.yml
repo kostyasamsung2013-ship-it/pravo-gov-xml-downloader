@@ -1,10 +1,8 @@
 name: Download pravo.gov.ru XML
 
 on:
-  # Запускать каждый день в 2:00 по UTC (5:00 по Москве)
   schedule:
-    - cron: '0 2 * * *'
-  # Или вручную
+    - cron: '0 2 * * *'  # Ежедневно в 5:00 по Москве
   workflow_dispatch:
 
 jobs:
@@ -16,14 +14,26 @@ jobs:
 
       - name: Download document_list.xml.gz
         run: |
-          echo "Скачивание файла..."
-          wget -nv https://pravo.gov.ru/portal/xml/document_list.xml.gz -O document_list.xml.gz
+          echo "Скачивание через имитацию браузера..."
+          curl -s -L \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            -H "Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7" \
+            -H "Accept-Encoding: gzip, deflate" \
+            -H "Connection: keep-alive" \
+            -o document_list.xml.gz \
+            https://pravo.gov.ru/portal/xml/document_list.xml.gz
           ls -lh
 
       - name: Commit and push
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add document_list.xml.gz
-          git commit -m "Update document_list.xml.gz ($(date '+%Y-%m-%d %H:%M'))" || echo "Нет изменений"
-          git push
+          if [ -f document_list.xml.gz ]; then
+            git add document_list.xml.gz
+            git commit -m "Update document_list.xml.gz ($(date '+%Y-%m-%d %H:%M'))" || echo "Нет изменений"
+            git push
+          else
+            echo "Файл не скачался!"
+            exit 1
+          fi
